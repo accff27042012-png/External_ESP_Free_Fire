@@ -12,13 +12,20 @@ jobs:
       - uses: actions/checkout@v4
       
       - name: Setup Theos
-        uses: Randomblock1/theos-action@v1
-        with:
-          theos-dir: 'theos'
-      
-      - name: Build Dylib
         run: |
-          export THEOS=./theos
+          git clone --recursive https://github.com/theos/theos.git theos
+          mkdir -p theos/sdks
+          cd theos/sdks
+          curl -L https://github.com/theos/sdks/archive/refs/heads/master.zip -o master.zip
+          unzip -q master.zip
+          mv sdks-master/* ./
+          rm -rf sdks-master master.zip
+          cd ../..
+          echo "THEOS=$(pwd)/theos" >> $GITHUB_ENV
+      
+      - name: Build Dylib with Theos
+        run: |
+          export THEOS=$(pwd)/theos
           make package FINALPACKAGE=1
         continue-on-error: true
       
@@ -26,14 +33,21 @@ jobs:
         run: |
           mkdir -p output
           clang++ -arch arm64 -dynamiclib \
-            -framework UIKit -framework Foundation \
-            -framework CoreGraphics -framework QuartzCore \
-            -framework OpenGLES -framework Metal \
-            Core/*.mm Core/*.cpp \
+            -framework UIKit \
+            -framework Foundation \
+            -framework CoreGraphics \
+            -framework QuartzCore \
+            -framework OpenGLES \
+            -framework Metal \
+            Core/*.mm \
+            Core/*.cpp \
             -o output/UltimateHack.dylib \
             -install_name @rpath/UltimateHack.dylib \
-            -fobjc-arc -std=c++14 -O3 \
-            -Wno-deprecated-declarations
+            -fobjc-arc \
+            -std=c++14 \
+            -O3 \
+            -Wno-deprecated-declarations \
+            -Wno-unused-variable
         continue-on-error: true
       
       - name: Upload Artifact
