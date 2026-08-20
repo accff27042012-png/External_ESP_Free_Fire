@@ -11,27 +11,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Build Hack Dylib from Core/
+      - name: Build Hack Dylib
         run: |
           mkdir -p output
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           
-          # Kiểm tra xem có thư mục Core/ không
-          if [ ! -d "Core" ]; then
-            echo "ERROR: Không tìm thấy thư mục Core/"
-            exit 1
-          fi
-          
-          # Tìm tất cả file .mm và .cpp
-          SOURCES=$(find Core -name "*.mm" -o -name "*.cpp" | tr '\n' ' ')
+          # Đường dẫn đúng: esp/Core/
+          SOURCES=$(find esp/Core -name "*.mm" -o -name "*.cpp" | tr '\n' ' ')
           
           if [ -z "$SOURCES" ]; then
-            echo "ERROR: Không tìm thấy file source nào trong Core/"
+            echo "ERROR: Không tìm thấy file trong esp/Core/"
             exit 1
           fi
           
-          echo "Compiling: $SOURCES"
-          
-          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          echo "Found: $SOURCES"
           
           clang++ -arch arm64 -dynamiclib \
             -isysroot "$SDK_PATH" \
@@ -49,7 +42,8 @@ jobs:
             -std=c++14 \
             -O3 \
             -Wno-deprecated-declarations \
-            -Wno-unused-variable
+            -Wno-unused-variable \
+            -fpermissive
       
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
