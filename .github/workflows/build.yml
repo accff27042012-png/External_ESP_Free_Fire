@@ -11,60 +11,45 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Build Dylib with iOS SDK
+      - name: Build Hack Dylib from Core/
         run: |
           mkdir -p output
-          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || echo "")
-          if [ -z "$SDK_PATH" ]; then
-            echo "iOS SDK not found, using macOS fallback"
-            SDK_PATH=""
+          
+          # Kiểm tra xem có thư mục Core/ không
+          if [ ! -d "Core" ]; then
+            echo "ERROR: Không tìm thấy thư mục Core/"
+            exit 1
           fi
           
-          # Build với SDK nếu có
-          if [ -n "$SDK_PATH" ]; then
-            clang++ -arch arm64 -dynamiclib \
-              -isysroot "$SDK_PATH" \
-              -framework UIKit \
-              -framework Foundation \
-              -framework CoreGraphics \
-              -framework QuartzCore \
-              -framework OpenGLES \
-              -framework Metal \
-              -o output/UltimateHack.dylib \
-              -install_name @rpath/UltimateHack.dylib \
-              -x objective-c++ \
-              - <<'EOF'
-          #import <UIKit/UIKit.h>
-          #import <Foundation/Foundation.h>
+          # Tìm tất cả file .mm và .cpp
+          SOURCES=$(find Core -name "*.mm" -o -name "*.cpp" | tr '\n' ' ')
           
-          __attribute__((constructor)) static void init() {
-              NSLog(@"[Hack] Loaded!");
-              dispatch_async(dispatch_get_main_queue(), ^{
-                  UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"Hack" 
-                                                                   message:@"Loaded Successfully!" 
-                                                                  delegate:nil 
-                                                         cancelButtonTitle:@"OK" 
-                                                         otherButtonTitles:nil];
-                  [alert show];
-              });
-          }
-          EOF
-          else
-            # Fallback: dùng macOS SDK (không có UIKit)
-            echo "Building with macOS SDK (UIKit not available)"
-            clang++ -dynamiclib \
-              -framework Foundation \
-              -o output/UltimateHack.dylib \
-              -install_name @rpath/UltimateHack.dylib \
-              -x objective-c++ \
-              - <<'EOF'
-          #import <Foundation/Foundation.h>
-          
-          __attribute__((constructor)) static void init() {
-              NSLog(@"[Hack] Loaded on macOS!");
-          }
-          EOF
+          if [ -z "$SOURCES" ]; then
+            echo "ERROR: Không tìm thấy file source nào trong Core/"
+            exit 1
           fi
+          
+          echo "Compiling: $SOURCES"
+          
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          
+          clang++ -arch arm64 -dynamiclib \
+            -isysroot "$SDK_PATH" \
+            -framework UIKit \
+            -framework Foundation \
+            -framework CoreGraphics \
+            -framework QuartzCore \
+            -framework OpenGLES \
+            -framework Metal \
+            -framework CoreImage \
+            $SOURCES \
+            -o output/UltimateHack.dylib \
+            -install_name @rpath/UltimateHack.dylib \
+            -fobjc-arc \
+            -std=c++14 \
+            -O3 \
+            -Wno-deprecated-declarations \
+            -Wno-unused-variable
       
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
