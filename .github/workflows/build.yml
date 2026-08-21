@@ -1,26 +1,25 @@
 name: Build Dylib
-
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       
-      - name: Build
+      - name: Build Tweak.xm
         run: |
           mkdir -p output
-          SDK=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || echo "")
-          if [ -z "$SDK" ]; then
-            echo "⚠️ iOS SDK not found, using macOS"
-            clang++ -dynamiclib -framework Foundation -o output/test.dylib -x c - <<< "void init(){}"
-          else
-            clang++ -arch arm64 -dynamiclib -isysroot "$SDK" -framework UIKit -framework Foundation -o output/test.dylib -x objective-c++ - <<< '#import <UIKit/UIKit.h> __attribute__((constructor)) void init(){ NSLog(@"OK"); }'
-          fi
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          clang++ -arch arm64 -dynamiclib \
+            -isysroot "$SDK" \
+            -framework UIKit \
+            -framework Foundation \
+            Tweak.xm \
+            -o output/UltimateHack.dylib \
+            -install_name @rpath/UltimateHack.dylib \
+            -fobjc-arc \
+            -O3
           ls -la output/
       
       - name: Upload
