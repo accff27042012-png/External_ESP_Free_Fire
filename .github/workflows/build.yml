@@ -1,5 +1,7 @@
 name: Build Dylib
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -12,15 +14,10 @@ jobs:
         run: |
           mkdir -p output
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          
-          # Kiểm tra file tồn tại
           if [ ! -f "UltimateHack.mm" ]; then
             echo "❌ Không tìm thấy UltimateHack.mm"
             exit 1
           fi
-          
-          echo "📦 Building UltimateHack.mm..."
-          
           clang++ -arch arm64 -dynamiclib \
             -isysroot "$SDK" \
             -framework UIKit \
@@ -33,19 +30,8 @@ jobs:
             -fobjc-arc \
             -std=c++14 \
             -O3 \
-            -Wno-deprecated-declarations \
-            -Wno-unused-variable
-          
-          # Hiển thị kích thước
+            -Wno-deprecated-declarations
           ls -la output/
-          
-          if [ -f "output/UltimateHack.dylib" ]; then
-            SIZE=$(ls -l output/UltimateHack.dylib | awk '{print $5}')
-            echo "✅ Build thành công! Kích thước: $SIZE bytes"
-          else
-            echo "❌ Build thất bại"
-            exit 1
-          fi
       
       - name: Upload Dylib
         uses: actions/upload-artifact@v4
