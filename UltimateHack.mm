@@ -7,13 +7,12 @@
 #include <sys/sysctl.h>
 
 // ============================================================
-// OFFSET TỔNG HỢP TỪ DUMP.CS
+// OFFSET CŨ (TỪ BẢN 1.126.1) - DÙNG THỬ
 // ============================================================
 #define OFFSET_LOCAL_PLAYER        0xB8
-#define OFFSET_CAMERA              0x108
-#define OFFSET_VIEW_MATRIX         0x1B0
 #define OFFSET_ENTITY_LIST         0x440
 #define OFFSET_PLAYER_LIST         0x450
+#define OFFSET_VIEW_MATRIX         0x1B0
 #define OFFSET_POSITION_X          0xC8
 #define OFFSET_POSITION_Y          0xC4
 #define OFFSET_POSITION_Z          0xD0
@@ -92,12 +91,13 @@ static void writeAddr(uintptr_t addr, float value) {
 }
 
 // ============================================================
-// LẤY LOCAL PLAYER
+// LẤY LOCAL PLAYER (DÙNG OFFSET CŨ)
 // ============================================================
 static uintptr_t getLocalPlayer() {
     uintptr_t base = getBaseAddress();
     if (base == 0) return 0;
     
+    // Cách 1: Dùng EntityList + isLocalPlayer
     uintptr_t entityList = readAddr<uintptr_t>(base + OFFSET_ENTITY_LIST);
     if (entityList != 0) {
         int count = readAddr<int>(entityList + 0x8);
@@ -110,6 +110,7 @@ static uintptr_t getLocalPlayer() {
         }
     }
     
+    // Cách 2: Dùng PlayerList
     uintptr_t playerList = readAddr<uintptr_t>(base + OFFSET_PLAYER_LIST);
     if (playerList != 0) {
         int count = readAddr<int>(playerList + 0x8);
@@ -327,7 +328,7 @@ static uintptr_t getBestTarget() {
 @end
 
 // ============================================================
-// MENU HUNGVN - HÌNH TRÒN + FOV SLIDER
+// MENU HUNGVN
 // ============================================================
 static UIButton *menuBtn = nil;
 static UIView *menuView = nil;
@@ -361,7 +362,6 @@ static void showMenu() {
     UIWindow *window = [UIApplication sharedApplication].keyWindow;
     if (!window || menuVisible) return;
     
-    // Menu hình tròn
     menuView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 280, 340)];
     menuView.center = window.center;
     menuView.backgroundColor = [UIColor colorWithWhite:0.05 alpha:0.95];
@@ -370,14 +370,12 @@ static void showMenu() {
     menuView.layer.borderWidth = 3;
     [window addSubview:menuView];
     
-    // Icon trung tâm - Cờ Việt Nam
     UILabel *centerIcon = [[UILabel alloc] initWithFrame:CGRectMake(0, 8, 280, 50)];
     centerIcon.text = @"🇻🇳";
     centerIcon.font = [UIFont systemFontOfSize:50];
     centerIcon.textAlignment = NSTextAlignmentCenter;
     [menuView addSubview:centerIcon];
     
-    // Tên hack
     UILabel *nameLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 56, 280, 24)];
     nameLabel.text = @"HungVn";
     nameLabel.textColor = [UIColor colorWithRed:218/255.0 green:37/255.0 blue:28/255.0 alpha:1.0];
@@ -385,7 +383,6 @@ static void showMenu() {
     nameLabel.textAlignment = NSTextAlignmentCenter;
     [menuView addSubview:nameLabel];
     
-    // Credit
     UILabel *creditLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 78, 280, 14)];
     creditLabel.text = @"made by HungDz";
     creditLabel.textColor = [UIColor colorWithRed:255/255.0 green:255/255.0 blue:0/255.0 alpha:0.8];
@@ -393,7 +390,6 @@ static void showMenu() {
     creditLabel.textAlignment = NSTextAlignmentCenter;
     [menuView addSubview:creditLabel];
     
-    // ESP Switch
     UISwitch *espSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(190, 110, 50, 30)];
     espSwitch.onTintColor = [UIColor colorWithRed:218/255.0 green:37/255.0 blue:28/255.0 alpha:1.0];
     espSwitch.thumbTintColor = [UIColor colorWithRed:255/255.0 green:255/255.0 blue:0/255.0 alpha:1.0];
@@ -407,7 +403,6 @@ static void showMenu() {
     espLabel.font = [UIFont systemFontOfSize:15];
     [menuView addSubview:espLabel];
     
-    // Aimbot Switch
     UISwitch *aimSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(190, 150, 50, 30)];
     aimSwitch.onTintColor = [UIColor colorWithRed:218/255.0 green:37/255.0 blue:28/255.0 alpha:1.0];
     aimSwitch.thumbTintColor = [UIColor colorWithRed:255/255.0 green:255/255.0 blue:0/255.0 alpha:1.0];
@@ -421,7 +416,6 @@ static void showMenu() {
     aimLabel.font = [UIFont systemFontOfSize:15];
     [menuView addSubview:aimLabel];
     
-    // FOV Label + Slider
     UILabel *fovLabel = [[UILabel alloc] initWithFrame:CGRectMake(30, 190, 100, 30)];
     fovLabel.text = @"FOV:";
     fovLabel.textColor = [UIColor whiteColor];
@@ -445,7 +439,6 @@ static void showMenu() {
     fovSlider.tag = 998;
     [menuView addSubview:fovSlider];
     
-    // Close
     UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     closeBtn.frame = CGRectMake(90, 265, 100, 30);
     [closeBtn setTitle:@"🇻🇳" forState:UIControlStateNormal];
