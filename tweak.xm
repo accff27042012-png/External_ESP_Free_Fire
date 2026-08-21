@@ -1,0 +1,37 @@
+name: Build Dylib
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build from Tweak.xm
+        run: |
+          mkdir -p output
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+
+          clang++ -arch arm64 -dynamiclib \
+            -isysroot "$SDK" \
+            -framework UIKit \
+            -framework Foundation \
+            -framework CoreGraphics \
+            -framework QuartzCore \
+            -framework OpenGLES \
+            -framework Metal \
+            Tweak.xm \
+            -o output/UltimateHack.dylib \
+            -install_name @rpath/UltimateHack.dylib \
+            -fobjc-arc \
+            -std=c++14 \
+            -O3 \
+            -Wno-deprecated-declarations
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: UltimateHack
+          path: output/*.dylib
