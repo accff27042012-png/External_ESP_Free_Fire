@@ -26,6 +26,10 @@ jobs:
         run: |
           export THEOS=$(pwd)/theos
           mkdir -p packages
+          
+          # Đổi tên Tweak.xm thành Tweak.mm để compile
+          cp Tweak.xm Tweak.mm
+          
           clang++ -arch arm64 -dynamiclib \
             -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
             -framework UIKit \
@@ -35,13 +39,14 @@ jobs:
             -framework OpenGLES \
             -framework Metal \
             -lz \
-            Tweak.xm \
+            Tweak.mm \
             -o packages/UltimateHack.dylib \
             -install_name @rpath/UltimateHack.dylib \
             -fobjc-arc \
             -std=c++14 \
             -O3 \
-            -Wno-deprecated-declarations
+            -Wno-deprecated-declarations \
+            -x objective-c++
       
       - name: Upload
         uses: actions/upload-artifact@v4
