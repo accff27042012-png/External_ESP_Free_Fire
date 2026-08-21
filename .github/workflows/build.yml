@@ -1,4 +1,4 @@
-name: Build Full Dylib
+name: Build Dylib
 on:
   push:
     branches: [ main ]
@@ -10,16 +10,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Build All Sources
+      - name: Build Core Only
         run: |
           mkdir -p packages
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           
-          # Tìm tất cả file .mm và .cpp trong toàn bộ dự án
-          SOURCES=$(find esp sources -name "*.mm" -o -name "*.cpp" 2>/dev/null | tr '\n' ' ')
+          # CHỈ LẤY FILE TRONG esp/Core/
+          SOURCES=$(find esp/Core -name "*.mm" -o -name "*.cpp" 2>/dev/null | tr '\n' ' ')
           
           if [ -z "$SOURCES" ]; then
-            echo "❌ Không tìm thấy source"
+            echo "❌ Không tìm thấy source trong esp/Core/"
             exit 1
           fi
           
@@ -35,7 +35,6 @@ jobs:
             -framework Metal \
             -lz \
             -Iesp/Core \
-            -Iheaders \
             -I. \
             $SOURCES \
             -o packages/UltimateHack.dylib \
