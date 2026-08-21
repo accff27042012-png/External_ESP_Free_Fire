@@ -1,33 +1,35 @@
-name: Build with Theos
+name: Test Build
+
 on:
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup Theos
+
+      - name: Create test.mm
         run: |
-          git clone --depth 1 https://github.com/theos/theos.git theos
-          cd theos
-          curl -L https://github.com/theos/sdks/archive/refs/heads/master.zip -o sdks.zip
-          unzip -q sdks.zip
-          mv sdks-master/* sdks/
-          rm -rf sdks-master sdks.zip
-          cd ..
-          echo "THEOS=$(pwd)/theos" >> $GITHUB_ENV
-          echo "$(pwd)/theos/bin" >> $GITHUB_PATH
-      
-      - name: Build with Theos
+          echo '#import <UIKit/UIKit.h>' > test.mm
+          echo '__attribute__((constructor)) static void init() { NSLog(@"Hello"); }' >> test.mm
+
+      - name: Build test.mm
         run: |
-          export THEOS=$(pwd)/theos
-          make clean
-          make package FINALPACKAGE=1
-          find . -name "*.dylib" -exec cp {} output/ \;
-      
-      - name: Upload
+          mkdir -p output
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          clang++ -arch arm64 -dynamiclib \
+            -isysroot "$SDK" \
+            -framework UIKit \
+            -framework Foundation \
+            test.mm \
+            -o output/test.dylib \
+            -install_name @rpath/test.dylib \
+            -fobjc-arc
+          ls -la output/
+
+      - name: Upload test.dylib
         uses: actions/upload-artifact@v4
         with:
-          name: UltimateHack
+          name: test-dylib
           path: output/*.dylib
