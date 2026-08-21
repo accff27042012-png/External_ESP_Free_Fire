@@ -7,25 +7,20 @@
 #include <sys/sysctl.h>
 
 // ============================================================
-// OFFSET THỰC TẾ TỪ DUMP.CS CỦA MÀY
+// OFFSET TỔNG HỢP TỪ DUMP.CS
 // ============================================================
-// Position (từ AxisPosX/Y/Z - IMG_0849)
-#define OFFSET_POSITION_X       0xC8
-#define OFFSET_POSITION_Y       0xC4
-#define OFFSET_POSITION_Z       0xD0
-
-// EntityList và PlayerList (từ COW.UIHudMatchR - IMG_0862)
-#define OFFSET_ENTITY_LIST      0x440
-#define OFFSET_PLAYER_LIST      0x450
-
-// ViewMatrix (tạm dùng 0x1B0 từ Camera.worldToCameraMatrix)
-#define OFFSET_VIEW_MATRIX      0x1B0
-
-// CameraControllerBase (từ IMG_0852)
-#define OFFSET_CAMERA_CONTROLLER_BASE  0x30  // ALGPBKBFAL
-
-// Transform (từ IMG_0847)
-#define OFFSET_TRANSFORM_POSITION  0x10  // Transform.position
+#define OFFSET_LOCAL_PLAYER        0xB8
+#define OFFSET_CAMERA              0x108
+#define OFFSET_VIEW_MATRIX         0x1B0
+#define OFFSET_ENTITY_LIST         0x440
+#define OFFSET_PLAYER_LIST         0x450
+#define OFFSET_POSITION_X          0xC8
+#define OFFSET_POSITION_Y          0xC4
+#define OFFSET_POSITION_Z          0xD0
+#define OFFSET_IS_LOCAL_PLAYER     0xD1
+#define OFFSET_HEALTH              0x1AC
+#define OFFSET_TEAM                0x1B0
+#define OFFSET_VIEW_ANGLE          0x1B8
 
 // ============================================================
 // VECTOR3
@@ -58,6 +53,8 @@ struct Vector3 {
 // MEMORY UTILS
 // ============================================================
 static uintptr_t baseAddress = 0;
+static bool aimbotEnabled = YES;
+static bool espEnabled = YES;
 
 static uintptr_t getBaseAddress() {
     if (baseAddress != 0) return baseAddress;
@@ -87,20 +84,46 @@ static T readAddr(uintptr_t addr) {
     return value;
 }
 
-// ============================================================
-// GET LOCAL PLAYER (cần tìm thêm trong dump.cs)
-// ============================================================
-static uintptr_t getLocalPlayer() {
-    // Tạm thời dùng cách tìm entity gần đúng
-    uintptr_t base = getBaseAddress();
-    if (base == 0) return 0;
-    // Cần tìm offset LocalPlayer trong dump.cs
-    return readAddr<uintptr_t>(base + 0x58); // Thử từ GameLogic.mm
+static void writeAddr(uintptr_t addr, float value) {
+    if (addr == 0) return;
+    vm_protect(mach_task_self(), (vm_address_t)addr, sizeof(float), 0, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+    *(float *)addr = value;
 }
 
 // ============================================================
-// GET ENTITY POSITION
+// LẤY LOCAL PLAYER
 // ============================================================
+static uintptr_t getLocalPlayer() {
+    uintptr_t base = getBaseAddress();
+    if (base == 0) return 0;
+    
+    uintptr_t entityList = readAddr<uintptr_t>(base + OFFSET_ENTITY_LIST);
+    if (entityList != 0) {
+        int count = readAddr<int>(entityList + 0x8);
+        uintptr_t items = readAddr<uintptr_t>(entityList + 0x10);
+        for (int i = 0; i < count && i < 100; i++) {
+            uintptr_t entity = readAddr<uintptr_t>(items + i * 8);
+            if (entity == 0) continue;
+            bool isLocal = readAddr<bool>(entity + OFFSET_IS_LOCAL_PLAYER);
+            if (isLocal) return entity;
+        }
+    }
+    
+    uintptr_t playerList = readAddr<uintptr_t>(base + OFFSET_PLAYER_LIST);
+    if (playerList != 0) {
+        int count = readAddr<int>(playerList + 0x8);
+        uintptr_t items = readAddr<uintptr_t>(playerList + 0x10);
+        for (int i = 0; i < count && i < 100; i++) {
+            uintptr_t player = readAddr<uintptr_t>(items + i * 8);
+            if (player == 0) continue;
+            bool isLocal = readAddr<bool>(player + OFFSET_IS_LOCAL_PLAYER);
+            if (isLocal) return player;
+        }
+    }
+    
+    return 0;
+}
+
 static Vector3 getEntityPos(uintptr_t entity) {
     Vector3 pos;
     if (entity == 0) return pos;
@@ -112,7 +135,12 @@ static Vector3 getEntityPos(uintptr_t entity) {
 
 static float getEntityHealth(uintptr_t entity) {
     if (entity == 0) return 0;
-    return readAddr<float>(entity + 0x1AC); // Tạm dùng từ IMG_0838
+    return readAddr<float>(entity + OFFSET_HEALTH);
+}
+
+static int getEntityTeam(uintptr_t entity) {
+    if (entity == 0) return -1;
+    return readAddr<int>(entity + OFFSET_TEAM);
 }
 
 // ============================================================
@@ -122,7 +150,6 @@ static bool worldToScreen(Vector3 pos, float *outX, float *outY) {
     uintptr_t base = getBaseAddress();
     float matrix[16];
     
-    // Đọc view matrix
     for (int i = 0; i < 16; i++) {
         matrix[i] = readAddr<float>(base + OFFSET_VIEW_MATRIX + i * 4);
     }
@@ -139,11 +166,76 @@ static bool worldToScreen(Vector3 pos, float *outX, float *outY) {
     *outX = screenWidth / 2 + (cx / w) * screenWidth / 2;
     *outY = screenHeight / 2 - (cy / w) * screenHeight / 2;
     
-    return true;
+    return YES;
 }
 
 // ============================================================
-// ESP VIEW
+// AIMBOT
+// ============================================================
+static Vector3 getBonePosition(uintptr_t entity, int boneOffset) {
+    // Mặc định lấy head (y + 1.8)
+    Vector3 pos = getEntityPos(entity);
+    pos.y += 1.8f;
+    return pos;
+}
+
+static void aimAt(Vector3 target) {
+    uintptr_t player = getLocalPlayer();
+    if (player == 0) return;
+    
+    Vector3 pos = getEntityPos(player);
+    float dx = target.x - pos.x;
+    float dy = target.y - pos.y;
+    float dz = target.z - pos.z;
+    
+    float yaw = atan2(dz, dx) * 180.0f / M_PI - 90.0f;
+    float pitch = atan2(dy, sqrt(dx*dx + dz*dz)) * 180.0f / M_PI;
+    
+    uintptr_t base = getBaseAddress();
+    writeAddr(base + OFFSET_VIEW_ANGLE, yaw);
+    writeAddr(base + OFFSET_VIEW_ANGLE + 4, pitch);
+}
+
+static uintptr_t getBestTarget() {
+    uintptr_t player = getLocalPlayer();
+    if (player == 0) return 0;
+    
+    uintptr_t base = getBaseAddress();
+    uintptr_t entityList = readAddr<uintptr_t>(base + OFFSET_ENTITY_LIST);
+    if (entityList == 0) return 0;
+    
+    Vector3 playerPos = getEntityPos(player);
+    int myTeam = getEntityTeam(player);
+    
+    uintptr_t bestTarget = 0;
+    float bestDist = 9999.0f;
+    
+    int count = readAddr<int>(entityList + 0x8);
+    uintptr_t items = readAddr<uintptr_t>(entityList + 0x10);
+    
+    for (int i = 0; i < count && i < 100; i++) {
+        uintptr_t entity = readAddr<uintptr_t>(items + i * 8);
+        if (entity == 0 || entity == player) continue;
+        
+        float health = getEntityHealth(entity);
+        if (health <= 0) continue;
+        
+        int team = getEntityTeam(entity);
+        if (team == myTeam) continue;
+        
+        Vector3 entityPos = getEntityPos(entity);
+        float dist = Vector3::Distance(playerPos, entityPos);
+        if (dist < bestDist && dist < 200) {
+            bestDist = dist;
+            bestTarget = entity;
+        }
+    }
+    
+    return bestTarget;
+}
+
+// ============================================================
+// ESP VIEW - TRẮNG ĐẸP
 // ============================================================
 @interface ESPView : UIView
 @end
@@ -152,33 +244,31 @@ static bool worldToScreen(Vector3 pos, float *outX, float *outY) {
 
 - (void)drawRect:(CGRect)rect {
     [super drawRect:rect];
+    if (!espEnabled) return;
+    
+    uintptr_t player = getLocalPlayer();
+    if (player == 0) return;
     
     uintptr_t base = getBaseAddress();
-    if (base == 0) return;
-    
-    uintptr_t localPlayer = getLocalPlayer();
-    if (localPlayer == 0) return;
-    
-    // Lấy danh sách entity từ HUD
-    uintptr_t hudMatch = readAddr<uintptr_t>(base + 0x????); // Cần tìm HUD Match
-    if (hudMatch == 0) return;
-    
-    uintptr_t entityList = readAddr<uintptr_t>(hudMatch + OFFSET_ENTITY_LIST);
+    uintptr_t entityList = readAddr<uintptr_t>(base + OFFSET_ENTITY_LIST);
     if (entityList == 0) return;
     
-    Vector3 playerPos = getEntityPos(localPlayer);
+    Vector3 playerPos = getEntityPos(player);
+    int myTeam = getEntityTeam(player);
     CGContextRef ctx = UIGraphicsGetCurrentContext();
     
-    // Đọc danh sách entity (giả định là List<Entity>)
-    int count = readAddr<int>(entityList + 0x8); // List.count thường ở +0x8
-    uintptr_t items = readAddr<uintptr_t>(entityList + 0x10); // List.items thường ở +0x10
+    int count = readAddr<int>(entityList + 0x8);
+    uintptr_t items = readAddr<uintptr_t>(entityList + 0x10);
     
-    for (int i = 0; i < count && i < 50; i++) {
+    for (int i = 0; i < count && i < 100; i++) {
         uintptr_t entity = readAddr<uintptr_t>(items + i * 8);
-        if (entity == 0 || entity == localPlayer) continue;
+        if (entity == 0 || entity == player) continue;
         
         float health = getEntityHealth(entity);
         if (health <= 0) continue;
+        
+        int team = getEntityTeam(entity);
+        if (team == myTeam) continue;
         
         Vector3 entityPos = getEntityPos(entity);
         float dist = Vector3::Distance(playerPos, entityPos);
@@ -191,34 +281,51 @@ static bool worldToScreen(Vector3 pos, float *outX, float *outY) {
         if (boxSize < 5) boxSize = 5;
         if (boxSize > 100) boxSize = 100;
         
-        // Vẽ box trắng
+        // ===== BOX TRẮNG TINH =====
         CGContextSetStrokeColorWithColor(ctx, [UIColor whiteColor].CGColor);
-        CGContextSetLineWidth(ctx, 1.5);
+        CGContextSetLineWidth(ctx, 2.0);
         CGContextAddRect(ctx, CGRectMake(screenX - boxSize/2, screenY - boxSize, boxSize, boxSize));
         CGContextStrokePath(ctx);
         
-        // Vẽ line
-        CGContextSetStrokeColorWithColor(ctx, [UIColor colorWithWhite:0.3 alpha:0.6].CGColor);
+        // ===== LINE TRẮNG MỜ =====
+        CGContextSetStrokeColorWithColor(ctx, [UIColor colorWithWhite:0.5 alpha:0.5].CGColor);
         CGContextSetLineWidth(ctx, 1.0);
+        CGContextSetLineDash(ctx, 4, 4);
         CGContextMoveToPoint(ctx, screenX, screenY);
         CGContextAddLineToPoint(ctx, screenX, screenY + boxSize * 0.8);
         CGContextStrokePath(ctx);
+        CGContextSetLineDash(ctx, 0, 0);
         
-        // Vẽ máu
+        // ===== HEALTH BAR =====
         float hpPercent = health / 100.0f;
-        CGContextSetFillColorWithColor(ctx, [UIColor colorWithWhite:0.1 alpha:0.8].CGColor);
+        if (hpPercent < 0) hpPercent = 0;
+        if (hpPercent > 1) hpPercent = 1;
+        
+        CGContextSetFillColorWithColor(ctx, [UIColor colorWithWhite:0.15 alpha:0.8].CGColor);
         CGContextFillRect(ctx, CGRectMake(screenX - boxSize/2 - 6, screenY - boxSize - 4, 4, boxSize + 8));
         
-        UIColor *hpColor = hpPercent > 0.7 ? [UIColor greenColor] : (hpPercent > 0.3 ? [UIColor yellowColor] : [UIColor redColor]);
+        UIColor *hpColor = hpPercent > 0.7 ? [UIColor greenColor] : 
+                           (hpPercent > 0.3 ? [UIColor yellowColor] : [UIColor redColor]);
         CGContextSetFillColorWithColor(ctx, hpColor.CGColor);
         float hpHeight = boxSize * hpPercent;
         CGContextFillRect(ctx, CGRectMake(screenX - boxSize/2 - 5, screenY - boxSize - 2 + (boxSize - hpHeight), 2, hpHeight));
+        
+        // ===== DISTANCE =====
+        NSString *distStr = [NSString stringWithFormat:@"%.0fm", dist];
+        NSDictionary *attrs = @{
+            NSFontAttributeName: [UIFont boldSystemFontOfSize:10],
+            NSForegroundColorAttributeName: [UIColor whiteColor],
+            NSStrokeColorAttributeName: [UIColor blackColor],
+            NSStrokeWidthAttributeName: @(-2.0)
+        };
+        CGSize size = [distStr sizeWithAttributes:attrs];
+        [distStr drawAtPoint:CGPointMake(screenX - size.width/2, screenY + boxSize + 4) withAttributes:attrs];
     }
 }
 @end
 
 // ============================================================
-// MENU
+// MENU ĐẸP
 // ============================================================
 static UIButton *menuBtn = nil;
 static UIView *menuView = nil;
@@ -231,20 +338,54 @@ static void showMenu() {
     
     menuView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 280, 200)];
     menuView.center = window.center;
-    menuView.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.9];
+    menuView.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.92];
     menuView.layer.cornerRadius = 16;
+    menuView.layer.borderColor = [UIColor whiteColor].CGColor;
+    menuView.layer.borderWidth = 1;
     [window addSubview:menuView];
     
-    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(20, 20, 240, 30)];
-    title.text = @"🔥 ESP MENU";
+    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(20, 16, 240, 30)];
+    title.text = @"✦ ULTIMATE HACK ✦";
     title.textColor = [UIColor whiteColor];
+    title.font = [UIFont boldSystemFontOfSize:18];
     title.textAlignment = NSTextAlignmentCenter;
     [menuView addSubview:title];
     
+    // ESP Switch
+    UISwitch *espSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(190, 60, 50, 30)];
+    espSwitch.onTintColor = [UIColor whiteColor];
+    espSwitch.thumbTintColor = [UIColor darkGrayColor];
+    [espSwitch setOn:espEnabled];
+    [espSwitch addTarget:self action:@selector(toggleESP:) forControlEvents:UIControlEventValueChanged];
+    [menuView addSubview:espSwitch];
+    
+    UILabel *espLabel = [[UILabel alloc] initWithFrame:CGRectMake(24, 60, 160, 30)];
+    espLabel.text = @"👁 ESP";
+    espLabel.textColor = [UIColor whiteColor];
+    espLabel.font = [UIFont systemFontOfSize:16];
+    [menuView addSubview:espLabel];
+    
+    // Aimbot Switch
+    UISwitch *aimSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(190, 100, 50, 30)];
+    aimSwitch.onTintColor = [UIColor whiteColor];
+    aimSwitch.thumbTintColor = [UIColor darkGrayColor];
+    [aimSwitch setOn:aimbotEnabled];
+    [aimSwitch addTarget:self action:@selector(toggleAimbot:) forControlEvents:UIControlEventValueChanged];
+    [menuView addSubview:aimSwitch];
+    
+    UILabel *aimLabel = [[UILabel alloc] initWithFrame:CGRectMake(24, 100, 160, 30)];
+    aimLabel.text = @"🎯 Aimbot";
+    aimLabel.textColor = [UIColor whiteColor];
+    aimLabel.font = [UIFont systemFontOfSize:16];
+    [menuView addSubview:aimLabel];
+    
+    // Close
     UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    closeBtn.frame = CGRectMake(80, 140, 120, 40);
-    [closeBtn setTitle:@"Close" forState:UIControlStateNormal];
-    [closeBtn setTitleColor:[UIColor redColor] forState:UIControlStateNormal];
+    closeBtn.frame = CGRectMake(80, 150, 120, 36);
+    [closeBtn setTitle:@"✕ Close" forState:UIControlStateNormal];
+    [closeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    closeBtn.backgroundColor = [UIColor colorWithWhite:0.3 alpha:0.5];
+    closeBtn.layer.cornerRadius = 8;
     [closeBtn addTarget:self action:@selector(closeMenu) forControlEvents:UIControlEventTouchUpInside];
     [menuView addSubview:closeBtn];
     
@@ -253,11 +394,19 @@ static void showMenu() {
 }
 
 static void closeMenu() {
-    [menuView removeFromSuperview];
-    menuView = nil;
-    menuVisible = NO;
-    menuBtn.hidden = NO;
+    [UIView animateWithDuration:0.3 animations:^{
+        menuView.transform = CGAffineTransformMakeScale(0.01, 0.01);
+        menuView.alpha = 0.0;
+    } completion:^(BOOL finished) {
+        [menuView removeFromSuperview];
+        menuView = nil;
+        menuVisible = NO;
+        menuBtn.hidden = NO;
+    }];
 }
+
+static void toggleESP(UISwitch *sender) { espEnabled = sender.isOn; }
+static void toggleAimbot(UISwitch *sender) { aimbotEnabled = sender.isOn; }
 
 static void toggleMenu() {
     if (menuVisible) closeMenu();
@@ -277,11 +426,13 @@ static void hooked_viewDidLoad(id self, SEL _cmd) {
         
         menuBtn = [UIButton buttonWithType:UIButtonTypeCustom];
         menuBtn.frame = CGRectMake(20, 80, 60, 60);
-        [menuBtn setTitle:@"⚡" forState:UIControlStateNormal];
+        [menuBtn setTitle:@"✦" forState:UIControlStateNormal];
         [menuBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        menuBtn.titleLabel.font = [UIFont boldSystemFontOfSize:30];
-        menuBtn.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.7];
+        menuBtn.titleLabel.font = [UIFont boldSystemFontOfSize:28];
+        menuBtn.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.7];
         menuBtn.layer.cornerRadius = 30;
+        menuBtn.layer.borderColor = [UIColor whiteColor].CGColor;
+        menuBtn.layer.borderWidth = 1;
         [menuBtn addTarget:self action:@selector(toggleMenu) forControlEvents:UIControlEventTouchUpInside];
         [window addSubview:menuBtn];
         
@@ -295,6 +446,19 @@ static void hooked_viewDidLoad(id self, SEL _cmd) {
             [espView setNeedsDisplay];
         }];
     });
+}
+
+static void (*orig_update)(id self, SEL _cmd, id sender);
+static void hooked_update(id self, SEL _cmd, id sender) {
+    orig_update(self, _cmd, sender);
+    if (!aimbotEnabled) return;
+    
+    uintptr_t target = getBestTarget();
+    if (target != 0) {
+        Vector3 headPos = getEntityPos(target);
+        headPos.y += 1.8f;
+        aimAt(headPos);
+    }
 }
 
 // ============================================================
@@ -317,6 +481,13 @@ __attribute__((constructor)) static void init() {
             orig_viewDidLoad = (void *)class_getMethodImplementation(target, vdl);
             Method m = class_getInstanceMethod(target, vdl);
             if (m) method_setImplementation(m, (IMP)hooked_viewDidLoad);
+        }
+        
+        SEL up = @selector(update:);
+        if ([target instancesRespondToSelector:up]) {
+            orig_update = (void *)class_getMethodImplementation(target, up);
+            Method m = class_getInstanceMethod(target, up);
+            if (m) method_setImplementation(m, (IMP)hooked_update);
         }
         
         NSLog(@"[UltimateHack] Hooked %s", class_getName(target));
