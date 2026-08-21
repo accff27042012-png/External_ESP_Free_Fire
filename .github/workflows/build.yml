@@ -1,25 +1,22 @@
 name: Build Dylib
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       
-      - name: Build Tweak.xm
+      - name: Build
         run: |
           mkdir -p output
+          echo '#import <UIKit/UIKit.h>' > test.mm
+          echo '__attribute__((constructor)) static void init() { NSLog(@"OK"); }' >> test.mm
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          clang++ -arch arm64 -dynamiclib \
-            -isysroot "$SDK" \
-            -framework UIKit \
-            -framework Foundation \
-            Tweak.xm \
-            -o output/UltimateHack.dylib \
-            -install_name @rpath/UltimateHack.dylib \
-            -fobjc-arc \
-            -O3
+          clang++ -arch arm64 -dynamiclib -isysroot "$SDK" -framework UIKit -framework Foundation test.mm -o output/test.dylib
           ls -la output/
       
       - name: Upload
