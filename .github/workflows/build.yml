@@ -1,4 +1,4 @@
-name: Build Dylib
+name: Build Real Dylib
 
 on:
   push:
@@ -10,28 +10,22 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup iOS SDK
-        run: |
-          sudo xcode-select --switch /Applications/Xcode_*.app 2>/dev/null || true
-          echo "SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)" >> $GITHUB_ENV
-      
-      - name: Build Dylib
+
+      - name: Build Hack Dylib from esp/Core/
         run: |
           mkdir -p output
-          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || echo "")
-          
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+
           # Tìm tất cả file .mm và .cpp trong esp/Core/
           SOURCES=$(find esp/Core -name "*.mm" -o -name "*.cpp" 2>/dev/null | tr '\n' ' ')
-          
+
           if [ -z "$SOURCES" ]; then
             echo "❌ Không tìm thấy source trong esp/Core/"
             exit 1
           fi
-          
+
           echo "📦 Compiling: $SOURCES"
-          
-          # Build với Clang
+
           clang++ -arch arm64 -dynamiclib \
             -isysroot "$SDK_PATH" \
             -framework UIKit \
@@ -55,16 +49,20 @@ jobs:
             -Wno-unused-variable \
             -Wno-c++11-compat \
             -fpermissive
-          
-          # Kiểm tra kết quả
+
+          # Kiểm tra kích thước file
           if [ -f "output/UltimateHack.dylib" ]; then
-            echo "✅ Build thành công!"
+            SIZE=$(ls -l output/UltimateHack.dylib | awk '{print $5}')
+            echo "✅ Build thành công! Kích thước: $SIZE bytes"
+            if [ $SIZE -lt 50000 ]; then
+              echo "⚠️ CẢNH BÁO: Dylib quá nhỏ ($SIZE bytes). Có thể source bị lỗi hoặc thiếu code."
+            fi
             ls -la output/
           else
             echo "❌ Build thất bại, không tìm thấy output/UltimateHack.dylib"
             exit 1
           fi
-      
+
       - name: Upload Dylib
         uses: actions/upload-artifact@v4
         with:
