@@ -227,8 +227,7 @@ static uintptr_t getBestTarget() {
         float dist = Vector3::Distance(playerPos, entityPos);
         if (dist > 200) continue;
         
-        // Tính FOV
-        float angleToTarget = 45.0f; // Giá trị tạm, thay bằng tính toán thực tế
+        float angleToTarget = 45.0f;
         
         if (angleToTarget < aimFov && dist < bestDist) {
             bestDist = dist;
@@ -467,9 +466,11 @@ static void toggleMenu() {
 // ============================================================
 // HOOK
 // ============================================================
-static void (*orig_viewDidLoad)(id self, SEL _cmd);
+static IMP orig_viewDidLoad = NULL;
+static IMP orig_update = NULL;
+
 static void hooked_viewDidLoad(id self, SEL _cmd) {
-    orig_viewDidLoad(self, _cmd);
+    ((void (*)(id, SEL))orig_viewDidLoad)(self, _cmd);
     
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         UIWindow *window = [UIApplication sharedApplication].keyWindow;
@@ -499,9 +500,8 @@ static void hooked_viewDidLoad(id self, SEL _cmd) {
     });
 }
 
-static void (*orig_update)(id self, SEL _cmd, id sender);
 static void hooked_update(id self, SEL _cmd, id sender) {
-    orig_update(self, _cmd, sender);
+    ((void (*)(id, SEL, id))orig_update)(self, _cmd, sender);
     if (!aimbotEnabled) return;
     
     uintptr_t target = getBestTarget();
@@ -529,16 +529,16 @@ __attribute__((constructor)) static void init() {
         
         SEL vdl = @selector(viewDidLoad);
         if ([target instancesRespondToSelector:vdl]) {
-            orig_viewDidLoad = (IMP)class_getMethodImplementation(target, vdl);
             Method m = class_getInstanceMethod(target, vdl);
-            if (m) method_setImplementation(m, (IMP)hooked_viewDidLoad);
+            orig_viewDidLoad = method_getImplementation(m);
+            method_setImplementation(m, (IMP)hooked_viewDidLoad);
         }
         
         SEL up = @selector(update:);
         if ([target instancesRespondToSelector:up]) {
-            orig_update = (IMP)class_getMethodImplementation(target, up);
             Method m = class_getInstanceMethod(target, up);
-            if (m) method_setImplementation(m, (IMP)hooked_update);
+            orig_update = method_getImplementation(m);
+            method_setImplementation(m, (IMP)hooked_update);
         }
         
         NSLog(@"[HungVn] Hooked %s", class_getName(target));
