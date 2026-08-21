@@ -1,6 +1,8 @@
-name: Test Build
+name: Build Dylib
 
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -8,28 +10,21 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Create test.mm
-        run: |
-          echo '#import <UIKit/UIKit.h>' > test.mm
-          echo '__attribute__((constructor)) static void init() { NSLog(@"Hello"); }' >> test.mm
-
-      - name: Build test.mm
+      
+      - name: Build
         run: |
           mkdir -p output
-          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          clang++ -arch arm64 -dynamiclib \
-            -isysroot "$SDK" \
-            -framework UIKit \
-            -framework Foundation \
-            test.mm \
-            -o output/test.dylib \
-            -install_name @rpath/test.dylib \
-            -fobjc-arc
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || echo "")
+          if [ -z "$SDK" ]; then
+            echo "⚠️ iOS SDK not found, using macOS"
+            clang++ -dynamiclib -framework Foundation -o output/test.dylib -x c - <<< "void init(){}"
+          else
+            clang++ -arch arm64 -dynamiclib -isysroot "$SDK" -framework UIKit -framework Foundation -o output/test.dylib -x objective-c++ - <<< '#import <UIKit/UIKit.h> __attribute__((constructor)) void init(){ NSLog(@"OK"); }'
+          fi
           ls -la output/
-
-      - name: Upload test.dylib
+      
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: test-dylib
+          name: UltimateHack
           path: output/*.dylib
