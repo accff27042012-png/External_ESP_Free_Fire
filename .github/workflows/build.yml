@@ -1,7 +1,5 @@
 name: Build Dylib
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -10,16 +8,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Build
+      - name: Build UltimateHack.mm
         run: |
           mkdir -p output
-          echo '#import <UIKit/UIKit.h>' > test.mm
-          echo '__attribute__((constructor)) static void init() { NSLog(@"OK"); }' >> test.mm
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          clang++ -arch arm64 -dynamiclib -isysroot "$SDK" -framework UIKit -framework Foundation test.mm -o output/test.dylib
+          
+          # Kiểm tra file tồn tại
+          if [ ! -f "UltimateHack.mm" ]; then
+            echo "❌ Không tìm thấy UltimateHack.mm"
+            exit 1
+          fi
+          
+          echo "📦 Building UltimateHack.mm..."
+          
+          clang++ -arch arm64 -dynamiclib \
+            -isysroot "$SDK" \
+            -framework UIKit \
+            -framework Foundation \
+            -framework CoreGraphics \
+            -framework QuartzCore \
+            UltimateHack.mm \
+            -o output/UltimateHack.dylib \
+            -install_name @rpath/UltimateHack.dylib \
+            -fobjc-arc \
+            -std=c++14 \
+            -O3 \
+            -Wno-deprecated-declarations \
+            -Wno-unused-variable
+          
+          # Hiển thị kích thước
           ls -la output/
+          
+          if [ -f "output/UltimateHack.dylib" ]; then
+            SIZE=$(ls -l output/UltimateHack.dylib | awk '{print $5}')
+            echo "✅ Build thành công! Kích thước: $SIZE bytes"
+          else
+            echo "❌ Build thất bại"
+            exit 1
+          fi
       
-      - name: Upload
+      - name: Upload Dylib
         uses: actions/upload-artifact@v4
         with:
           name: UltimateHack
