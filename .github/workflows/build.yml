@@ -10,25 +10,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Setup Theos
+      - name: Build Dylib directly
         run: |
-          git clone --depth 1 https://github.com/theos/theos.git theos
-          cd theos
-          curl -L https://github.com/theos/sdks/archive/refs/heads/master.zip -o sdks.zip
-          unzip -q sdks.zip
-          mv sdks-master/* sdks/
-          rm -rf sdks-master sdks.zip
-          cd ..
-          echo "THEOS=$(pwd)/theos" >> $GITHUB_ENV
-          echo "$(pwd)/theos/bin" >> $GITHUB_PATH
+          mkdir -p packages
+          
+          # Lấy đường dẫn iOS SDK
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          
+          # Build thẳng ra dylib
+          clang++ -arch arm64 -dynamiclib \
+            -isysroot "$SDK_PATH" \
+            -framework UIKit \
+            -framework Foundation \
+            -framework CoreGraphics \
+            -framework QuartzCore \
+            -framework OpenGLES \
+            -framework Metal \
+            -lz \
+            Tweak.xm \
+            -o packages/UltimateHack.dylib \
+            -install_name @rpath/UltimateHack.dylib \
+            -fobjc-arc \
+            -std=c++14 \
+            -O3 \
+            -Wno-deprecated-declarations \
+            -x objective-c++
+          
+          # Kiểm tra kết quả
+          ls -la packages/
       
-      - name: Build
-        run: |
-          export THEOS=$(pwd)/theos
-          make package FINALPACKAGE=1
-      
-      - name: Upload
+      - name: Upload Dylib
         uses: actions/upload-artifact@v4
         with:
-          name: HungVnHack
-          path: packages/*.deb
+          name: UltimateHack
+          path: packages/*.dylib
