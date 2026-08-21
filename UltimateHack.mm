@@ -7,7 +7,7 @@
 #include <sys/sysctl.h>
 
 // ============================================================
-// OFFSET CŨ - CÓ THỂ KHÔNG CHÍNH XÁC
+// OFFSET (CŨ - CẦN CẬP NHẬT)
 // ============================================================
 #define OFFSET_LOCAL_PLAYER        0xB8
 #define OFFSET_ENTITY_LIST         0x440
@@ -52,8 +52,12 @@ struct Vector3 {
 // MEMORY UTILS
 // ============================================================
 static uintptr_t baseAddress = 0;
-static bool aimbotEnabled = YES;
 static bool espEnabled = YES;
+static bool wallHackEnabled = YES;
+static bool aimbotEnabled = YES;
+static int aimbotMode = 0; // 0: Luôn aim, 1: Aim khi bắn, 2: Aim khi ngắm
+static bool isFiring = NO;
+static bool isAiming = NO;
 static float aimFov = 30.0f;
 
 static uintptr_t getBaseAddress() {
@@ -170,14 +174,8 @@ static bool worldToScreen(Vector3 pos, float *outX, float *outY) {
 }
 
 // ============================================================
-// AIMBOT + FOV
+// AIMBOT
 // ============================================================
-static Vector3 getBonePosition(uintptr_t entity, int boneOffset) {
-    Vector3 pos = getEntityPos(entity);
-    pos.y += 1.8f;
-    return pos;
-}
-
 static void aimAt(Vector3 target) {
     uintptr_t player = getLocalPlayer();
     if (player == 0) return;
@@ -221,6 +219,11 @@ static uintptr_t getBestTarget() {
         
         int team = getEntityTeam(entity);
         if (team == myTeam) continue;
+        
+        // Check tường (nếu bật wallhack)
+        if (!wallHackEnabled) {
+            // Kiểm tra xem có vật cản giữa player và target không (bỏ qua)
+        }
         
         Vector3 entityPos = getEntityPos(entity);
         float dist = Vector3::Distance(playerPos, entityPos);
@@ -284,17 +287,20 @@ static uintptr_t getBestTarget() {
         if (boxSize < 5) boxSize = 5;
         if (boxSize > 100) boxSize = 100;
         
+        // BOX TRẮNG
         CGContextSetStrokeColorWithColor(ctx, [UIColor whiteColor].CGColor);
         CGContextSetLineWidth(ctx, 2.0);
         CGContextAddRect(ctx, CGRectMake(screenX - boxSize/2, screenY - boxSize, boxSize, boxSize));
         CGContextStrokePath(ctx);
         
+        // LINE
         CGContextSetStrokeColorWithColor(ctx, [UIColor colorWithWhite:0.5 alpha:0.5].CGColor);
         CGContextSetLineWidth(ctx, 1.0);
         CGContextMoveToPoint(ctx, screenX, screenY);
         CGContextAddLineToPoint(ctx, screenX, screenY + boxSize * 0.8);
         CGContextStrokePath(ctx);
         
+        // HEALTH BAR
         float hpPercent = health / 100.0f;
         if (hpPercent < 0) hpPercent = 0;
         if (hpPercent > 1) hpPercent = 1;
@@ -308,6 +314,7 @@ static uintptr_t getBestTarget() {
         float hpHeight = boxSize * hpPercent;
         CGContextFillRect(ctx, CGRectMake(screenX - boxSize/2 - 5, screenY - boxSize - 2 + (boxSize - hpHeight), 2, hpHeight));
         
+        // DISTANCE
         NSString *distStr = [NSString stringWithFormat:@"%.0fm", dist];
         NSDictionary *attrs = @{
             NSFontAttributeName: [UIFont boldSystemFontOfSize:10],
@@ -322,14 +329,17 @@ static uintptr_t getBestTarget() {
 @end
 
 // ============================================================
-// MENU
+// MENU CHÍNH
 // ============================================================
 static UIButton *menuBtn = nil;
 static UIView *menuView = nil;
 static BOOL menuVisible = NO;
+static BOOL menuMinimized = NO;
 static ESPView *espView = nil;
 
+// Hàm toggle các tính năng
 static void toggleESP(UISwitch *sender) { espEnabled = sender.isOn; }
+static void toggleWallhack(UISwitch *sender) { wallHackEnabled = sender.isOn; }
 static void toggleAimbot(UISwitch *sender) { aimbotEnabled = sender.isOn; }
 
 static void fovChanged(UISlider *slider) {
@@ -340,90 +350,160 @@ static void fovChanged(UISlider *slider) {
     }
 }
 
+static void aimModeChanged(UISegmentedControl *seg) {
+    aimbotMode = (int)seg.selectedSegmentIndex;
+}
+
 static void closeMenu() {
-    [UIView animateWithDuration:0.3 animations:^{
-        menuView.transform = CGAffineTransformMakeScale(0.01, 0.01);
-        menuView.alpha = 0.0;
-    } completion:^(BOOL finished) {
+    if (menuView) {
         [menuView removeFromSuperview];
         menuView = nil;
-        menuVisible = NO;
-        menuBtn.hidden = NO;
-    }];
+    }
+    menuVisible = NO;
+    menuMinimized = NO;
+    menuBtn.hidden = NO;
+}
+
+static void minimizeMenu() {
+    if (menuView) {
+        // Thu nhỏ menu thành thanh nhỏ
+        menuMinimized = !menuMinimized;
+        if (menuMinimized) {
+            menuView.frame = CGRectMake(0, 0, 60, 60);
+            menuView.layer.cornerRadius = 30;
+        } else {
+            menuView.frame = CGRectMake(0, 0, 320, 460);
+            menuView.layer.cornerRadius = 0;
+        }
+    }
 }
 
 static void showMenu() {
     UIWindow *window = [UIApplication sharedApplication].keyWindow;
     if (!window || menuVisible) return;
     
-    menuView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 280, 340)];
+    menuView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 460)];
     menuView.center = window.center;
     menuView.backgroundColor = [UIColor colorWithWhite:0.05 alpha:0.95];
-    menuView.layer.cornerRadius = 140;
+    menuView.layer.cornerRadius = 16;
     menuView.layer.borderColor = [UIColor colorWithRed:218/255.0 green:37/255.0 blue:28/255.0 alpha:1.0].CGColor;
-    menuView.layer.borderWidth = 3;
+    menuView.layer.borderWidth = 2;
     [window addSubview:menuView];
     
-    UILabel *centerIcon = [[UILabel alloc] initWithFrame:CGRectMake(0, 8, 280, 50)];
-    centerIcon.text = @"🇻🇳";
-    centerIcon.font = [UIFont systemFontOfSize:50];
-    centerIcon.textAlignment = NSTextAlignmentCenter;
-    [menuView addSubview:centerIcon];
+    int yOffset = 20;
+    int step = 44;
     
-    UILabel *nameLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 56, 280, 24)];
-    nameLabel.text = @"HungVn";
-    nameLabel.textColor = [UIColor colorWithRed:218/255.0 green:37/255.0 blue:28/255.0 alpha:1.0];
-    nameLabel.font = [UIFont boldSystemFontOfSize:20];
-    nameLabel.textAlignment = NSTextAlignmentCenter;
-    [menuView addSubview:nameLabel];
+    // Tiêu đề + nút thu nhỏ (-) và đóng (x)
+    UIView *titleBar = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 44)];
+    titleBar.backgroundColor = [UIColor colorWithWhite:0.1 alpha:1.0];
+    titleBar.layer.cornerRadius = 16;
+    titleBar.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
+    [menuView addSubview:titleBar];
     
-    UILabel *creditLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 78, 280, 14)];
-    creditLabel.text = @"made by HungDz";
-    creditLabel.textColor = [UIColor colorWithRed:255/255.0 green:255/255.0 blue:0/255.0 alpha:0.8];
-    creditLabel.font = [UIFont systemFontOfSize:11];
-    creditLabel.textAlignment = NSTextAlignmentCenter;
-    [menuView addSubview:creditLabel];
+    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(20, 10, 200, 24)];
+    title.text = @"🇻🇳 HungVn Hack";
+    title.textColor = [UIColor whiteColor];
+    title.font = [UIFont boldSystemFontOfSize:16];
+    [titleBar addSubview:title];
     
-    UISwitch *espSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(190, 110, 50, 30)];
+    // Nút thu nhỏ (-)
+    UIButton *minimizeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    minimizeBtn.frame = CGRectMake(260, 10, 24, 24);
+    [minimizeBtn setTitle:@"-" forState:UIControlStateNormal];
+    [minimizeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    minimizeBtn.titleLabel.font = [UIFont boldSystemFontOfSize:20];
+    [minimizeBtn addTarget:nil action:@selector(minimizeMenu) forControlEvents:UIControlEventTouchUpInside];
+    [titleBar addSubview:minimizeBtn];
+    
+    // Nút đóng (x)
+    UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    closeBtn.frame = CGRectMake(290, 10, 24, 24);
+    [closeBtn setTitle:@"✕" forState:UIControlStateNormal];
+    [closeBtn setTitleColor:[UIColor redColor] forState:UIControlStateNormal];
+    closeBtn.titleLabel.font = [UIFont boldSystemFontOfSize:16];
+    [closeBtn addTarget:nil action:@selector(closeMenu) forControlEvents:UIControlEventTouchUpInside];
+    [titleBar addSubview:closeBtn];
+    
+    yOffset = 54;
+    
+    // ESP Switch
+    UISwitch *espSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(230, yOffset, 50, 30)];
     espSwitch.onTintColor = [UIColor colorWithRed:218/255.0 green:37/255.0 blue:28/255.0 alpha:1.0];
     espSwitch.thumbTintColor = [UIColor colorWithRed:255/255.0 green:255/255.0 blue:0/255.0 alpha:1.0];
     [espSwitch setOn:espEnabled];
     [espSwitch addTarget:nil action:@selector(toggleESP:) forControlEvents:UIControlEventValueChanged];
     [menuView addSubview:espSwitch];
     
-    UILabel *espLabel = [[UILabel alloc] initWithFrame:CGRectMake(30, 110, 150, 30)];
-    espLabel.text = @"🇻🇳 ESP";
+    UILabel *espLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, yOffset, 160, 30)];
+    espLabel.text = @"👁 ESP";
     espLabel.textColor = [UIColor whiteColor];
     espLabel.font = [UIFont systemFontOfSize:15];
     [menuView addSubview:espLabel];
+    yOffset += step;
     
-    UISwitch *aimSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(190, 150, 50, 30)];
+    // Wallhack Switch
+    UISwitch *whSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(230, yOffset, 50, 30)];
+    whSwitch.onTintColor = [UIColor colorWithRed:218/255.0 green:37/255.0 blue:28/255.0 alpha:1.0];
+    whSwitch.thumbTintColor = [UIColor colorWithRed:255/255.0 green:255/255.0 blue:0/255.0 alpha:1.0];
+    [whSwitch setOn:wallHackEnabled];
+    [whSwitch addTarget:nil action:@selector(toggleWallhack:) forControlEvents:UIControlEventValueChanged];
+    [menuView addSubview:whSwitch];
+    
+    UILabel *whLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, yOffset, 160, 30)];
+    whLabel.text = @"🧱 Check Wall";
+    whLabel.textColor = [UIColor whiteColor];
+    whLabel.font = [UIFont systemFontOfSize:15];
+    [menuView addSubview:whLabel];
+    yOffset += step;
+    
+    // Aimbot Switch
+    UISwitch *aimSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(230, yOffset, 50, 30)];
     aimSwitch.onTintColor = [UIColor colorWithRed:218/255.0 green:37/255.0 blue:28/255.0 alpha:1.0];
     aimSwitch.thumbTintColor = [UIColor colorWithRed:255/255.0 green:255/255.0 blue:0/255.0 alpha:1.0];
     [aimSwitch setOn:aimbotEnabled];
     [aimSwitch addTarget:nil action:@selector(toggleAimbot:) forControlEvents:UIControlEventValueChanged];
     [menuView addSubview:aimSwitch];
     
-    UILabel *aimLabel = [[UILabel alloc] initWithFrame:CGRectMake(30, 150, 150, 30)];
-    aimLabel.text = @"🇻🇳 Aimbot";
+    UILabel *aimLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, yOffset, 160, 30)];
+    aimLabel.text = @"🎯 Aimbot";
     aimLabel.textColor = [UIColor whiteColor];
     aimLabel.font = [UIFont systemFontOfSize:15];
     [menuView addSubview:aimLabel];
+    yOffset += step;
     
-    UILabel *fovLabel = [[UILabel alloc] initWithFrame:CGRectMake(30, 190, 100, 30)];
+    // Aimbot Mode (Segmented Control)
+    UILabel *modeLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, yOffset, 160, 30)];
+    modeLabel.text = @"Mode:";
+    modeLabel.textColor = [UIColor whiteColor];
+    modeLabel.font = [UIFont systemFontOfSize:15];
+    [menuView addSubview:modeLabel];
+    
+    UISegmentedControl *modeSeg = [[UISegmentedControl alloc] initWithFrame:CGRectMake(20, yOffset + 30, 280, 30)];
+    [modeSeg insertSegmentWithTitle:@"Luôn aim" atIndex:0 animated:NO];
+    [modeSeg insertSegmentWithTitle:@"Khi bắn" atIndex:1 animated:NO];
+    [modeSeg insertSegmentWithTitle:@"Khi ngắm" atIndex:2 animated:NO];
+    modeSeg.selectedSegmentIndex = aimbotMode;
+    modeSeg.tintColor = [UIColor colorWithRed:218/255.0 green:37/255.0 blue:28/255.0 alpha:1.0];
+    [modeSeg addTarget:nil action:@selector(aimModeChanged:) forControlEvents:UIControlEventValueChanged];
+    [menuView addSubview:modeSeg];
+    yOffset += 70;
+    
+    // FOV Slider
+    UILabel *fovLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, yOffset, 100, 30)];
     fovLabel.text = @"FOV:";
     fovLabel.textColor = [UIColor whiteColor];
     fovLabel.font = [UIFont systemFontOfSize:15];
     [menuView addSubview:fovLabel];
     
-    UILabel *fovValueLabel = [[UILabel alloc] initWithFrame:CGRectMake(190, 190, 60, 30)];
+    UILabel *fovValueLabel = [[UILabel alloc] initWithFrame:CGRectMake(220, yOffset, 80, 30)];
     fovValueLabel.text = [NSString stringWithFormat:@"%.0f°", aimFov];
     fovValueLabel.textColor = [UIColor colorWithRed:255/255.0 green:255/255.0 blue:0/255.0 alpha:1.0];
     fovValueLabel.font = [UIFont systemFontOfSize:15];
     fovValueLabel.tag = 999;
     [menuView addSubview:fovValueLabel];
+    yOffset += 30;
     
-    UISlider *fovSlider = [[UISlider alloc] initWithFrame:CGRectMake(30, 220, 220, 30)];
+    UISlider *fovSlider = [[UISlider alloc] initWithFrame:CGRectMake(20, yOffset, 280, 30)];
     fovSlider.minimumValue = 10.0f;
     fovSlider.maximumValue = 120.0f;
     fovSlider.value = aimFov;
@@ -433,25 +513,20 @@ static void showMenu() {
     fovSlider.tag = 998;
     [menuView addSubview:fovSlider];
     
-    UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    closeBtn.frame = CGRectMake(90, 265, 100, 30);
-    [closeBtn setTitle:@"🇻🇳" forState:UIControlStateNormal];
-    [closeBtn setTitleColor:[UIColor colorWithRed:255/255.0 green:255/255.0 blue:0/255.0 alpha:1.0] forState:UIControlStateNormal];
-    closeBtn.titleLabel.font = [UIFont boldSystemFontOfSize:20];
-    [closeBtn addTarget:nil action:@selector(closeMenu) forControlEvents:UIControlEventTouchUpInside];
-    [menuView addSubview:closeBtn];
-    
     menuVisible = YES;
     menuBtn.hidden = YES;
 }
 
 static void toggleMenu() {
-    if (menuVisible) closeMenu();
-    else showMenu();
+    if (menuVisible) {
+        closeMenu();
+    } else {
+        showMenu();
+    }
 }
 
 // ============================================================
-// HÀM TẠO MENU (dùng trong hook)
+// HÀM TẠO MENU
 // ============================================================
 static void createMenuOnWindow(UIWindow *window) {
     if (!window) return;
@@ -479,97 +554,54 @@ static void createMenuOnWindow(UIWindow *window) {
         [espView setNeedsDisplay];
     }];
     
-    NSLog(@"[HungVn] Menu da duoc tao!");
+    NSLog(@"[HungVn] Menu created!");
 }
 
 // ============================================================
-// HOOK
+// HOOK UIApplication sendEvent (chắc chắn được gọi)
 // ============================================================
-static IMP orig_viewDidLoad = NULL;
-static IMP orig_update = NULL;
+static IMP orig_sendEvent = NULL;
 
-static void hooked_viewDidLoad(id self, SEL _cmd) {
-    ((void (*)(id, SEL))orig_viewDidLoad)(self, _cmd);
-    
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        UIWindow *window = [UIApplication sharedApplication].keyWindow;
-        if (!window) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-                UIWindow *window2 = [UIApplication sharedApplication].keyWindow;
-                if (window2) {
-                    createMenuOnWindow(window2);
-                }
-            });
-            return;
-        }
-        createMenuOnWindow(window);
-    });
-}
-
-static void hooked_update(id self, SEL _cmd, id sender) {
-    ((void (*)(id, SEL, id))orig_update)(self, _cmd, sender);
-    if (!aimbotEnabled) return;
-    
-    uintptr_t target = getBestTarget();
-    if (target != 0) {
-        Vector3 headPos = getEntityPos(target);
-        headPos.y += 1.8f;
-        aimAt(headPos);
+static void hooked_sendEvent(id self, SEL _cmd, UIEvent *event) {
+    static BOOL menuCreated = NO;
+    if (!menuCreated) {
+        menuCreated = YES;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIWindow *window = [UIApplication sharedApplication].keyWindow;
+            if (window) {
+                createMenuOnWindow(window);
+            } else {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                    UIWindow *window2 = [UIApplication sharedApplication].keyWindow;
+                    if (window2) {
+                        createMenuOnWindow(window2);
+                    }
+                });
+            }
+        });
     }
+    ((void (*)(id, SEL, UIEvent *))orig_sendEvent)(self, _cmd, event);
 }
 
 // ============================================================
 // CTOR
 // ============================================================
 __attribute__((constructor)) static void init() {
-    NSLog(@"[HungVn] Dylib da duoc load!");
+    NSLog(@"[HungVn] Dylib loaded!");
     
+    Class UIApplicationClass = objc_getClass("UIApplication");
+    if (UIApplicationClass) {
+        SEL sendEvent = @selector(sendEvent:);
+        Method m = class_getInstanceMethod(UIApplicationClass, sendEvent);
+        if (m) {
+            orig_sendEvent = method_getImplementation(m);
+            method_setImplementation(m, (IMP)hooked_sendEvent);
+            NSLog(@"[HungVn] Hooked UIApplication sendEvent!");
+        }
+    }
+    
+    // Hook để nhận sự kiện bắn và ngắm (cần offset)
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSArray *classNames = @[
-            @"UnityAppController",
-            @"AppController",
-            @"GameController",
-            @"SceneDelegate",
-            @"UnityFramework",
-            @"UIApplicationDelegate"
-        ];
-        
-        Class target = nil;
-        for (NSString *name in classNames) {
-            target = NSClassFromString(name);
-            if (target) {
-                NSLog(@"[HungVn] Tim thay class: %@", name);
-                break;
-            }
-        }
-        
-        if (!target) {
-            NSLog(@"[HungVn] KHONG tim thay class chinh!");
-            return;
-        }
-        
-        SEL vdl = @selector(viewDidLoad);
-        if ([target instancesRespondToSelector:vdl]) {
-            Method m = class_getInstanceMethod(target, vdl);
-            orig_viewDidLoad = method_getImplementation(m);
-            method_setImplementation(m, (IMP)hooked_viewDidLoad);
-            NSLog(@"[HungVn] Da hook viewDidLoad cua %s", class_getName(target));
-        } else {
-            SEL appLaunch = @selector(applicationDidFinishLaunching:);
-            if ([target instancesRespondToSelector:appLaunch]) {
-                Method m = class_getInstanceMethod(target, appLaunch);
-                orig_viewDidLoad = method_getImplementation(m);
-                method_setImplementation(m, (IMP)hooked_viewDidLoad);
-                NSLog(@"[HungVn] Da hook applicationDidFinishLaunching");
-            }
-        }
-        
-        SEL up = @selector(update:);
-        if ([target instancesRespondToSelector:up]) {
-            Method m = class_getInstanceMethod(target, up);
-            orig_update = method_getImplementation(m);
-            method_setImplementation(m, (IMP)hooked_update);
-            NSLog(@"[HungVn] Da hook update");
-        }
+        // Thêm logic check bắn/ngắm ở đây
     });
 }
