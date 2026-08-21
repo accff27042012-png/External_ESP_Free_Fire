@@ -8,7 +8,7 @@
 #include <zlib.h>
 
 // ============================================================
-// DUMMY DATA - TĂNG DUNG LƯỢNG (~15MB)
+// DUMMY DATA - TĂNG DUNG LƯỢNG
 // ============================================================
 #define DUMMY_SIZE 5242880
 static char dummyBuffer1[DUMMY_SIZE];
@@ -36,7 +36,6 @@ __attribute__((used)) static void dummyFunction2() {
         hash2 ^= (hash2 >> 17);
         hash3 ^= (hash3 << 5);
     }
-    NSLog(@"[Dummy] Hashes: %u, %u, %u", hash1, hash2, hash3);
 }
 
 __attribute__((used)) static void dummyFunction3() {
@@ -61,7 +60,6 @@ __attribute__((used)) static void dummyFunction4() {
     str[16383] = '\0';
     unsigned long crc1 = crc32(0, (const Bytef*)str, 8192);
     unsigned long crc2 = crc32(crc1, (const Bytef*)(str + 8192), 8191);
-    NSLog(@"[Dummy] CRC: %lu", crc2);
 }
 
 __attribute__((used)) static void dummyFunction5() {
@@ -129,11 +127,10 @@ __attribute__((used)) static void dummyFunction10() {
         total ^= dummyBuffer2[i];
         total += dummyBuffer3[i] * 3;
     }
-    NSLog(@"[Dummy] Total: %llu", total);
 }
 
 // ============================================================
-// OFFSET
+// OFFSET (CẦN CẬP NHẬT THEO DUMP.CS)
 // ============================================================
 #define OFFSET_LOCAL_PLAYER        0xB8
 #define OFFSET_ENTITY_LIST         0x440
@@ -183,6 +180,14 @@ static bool wallHackEnabled = YES;
 static bool aimbotEnabled = YES;
 static int aimbotMode = 0;
 static float aimFov = 30.0f;
+static UIWindow *menuWindow = nil;
+static UIButton *menuBtn = nil;
+static UIView *menuView = nil;
+static BOOL menuVisible = NO;
+static BOOL menuMinimized = NO;
+static UIView *espView = nil;
+static BOOL menuCreated = NO;
+static UIWindow *gameWindow = nil;
 
 static uintptr_t getBaseAddress() {
     if (baseAddress != 0) return baseAddress;
@@ -218,6 +223,9 @@ static void writeAddr(uintptr_t addr, float value) {
     *(float *)addr = value;
 }
 
+// ============================================================
+// LẤY LOCAL PLAYER
+// ============================================================
 static uintptr_t getLocalPlayer() {
     uintptr_t base = getBaseAddress();
     if (base == 0) return 0;
@@ -268,6 +276,9 @@ static int getEntityTeam(uintptr_t entity) {
     return readAddr<int>(entity + OFFSET_TEAM);
 }
 
+// ============================================================
+// WORLD TO SCREEN
+// ============================================================
 static bool worldToScreen(Vector3 pos, float *outX, float *outY) {
     uintptr_t base = getBaseAddress();
     float matrix[16];
@@ -291,6 +302,9 @@ static bool worldToScreen(Vector3 pos, float *outX, float *outY) {
     return YES;
 }
 
+// ============================================================
+// AIMBOT
+// ============================================================
 static void aimAt(Vector3 target) {
     uintptr_t player = getLocalPlayer();
     if (player == 0) return;
@@ -435,17 +449,8 @@ static uintptr_t getBestTarget() {
 @end
 
 // ============================================================
-// MENU - CHẶN THAO TÁC GAME KHI BẬT
+// MENU
 // ============================================================
-static UIButton *menuBtn = nil;
-static UIView *menuView = nil;
-static BOOL menuVisible = NO;
-static BOOL menuMinimized = NO;
-static ESPView *espView = nil;
-static BOOL menuCreated = NO;
-static UIWindow *menuWindow = nil;
-static UIWindow *gameWindow = nil;
-
 static void toggleESP(UISwitch *sender) { espEnabled = sender.isOn; }
 static void toggleWallhack(UISwitch *sender) { wallHackEnabled = sender.isOn; }
 static void toggleAimbot(UISwitch *sender) { aimbotEnabled = sender.isOn; }
@@ -470,8 +475,6 @@ static void closeMenu() {
     menuVisible = NO;
     menuMinimized = NO;
     menuBtn.hidden = NO;
-    // Cho phép thao tác game
-    [gameWindow makeKeyAndVisible];
     [menuWindow setHidden:YES];
 }
 
@@ -496,10 +499,8 @@ static void showMenu() {
     if (!menuWindow) return;
     if (menuVisible) return;
     
-    // Chặn thao tác game - đưa menu window lên trên
-    [menuWindow makeKeyAndVisible];
     [menuWindow setHidden:NO];
-    [menuWindow bringSubviewToFront:menuView];
+    [menuWindow makeKeyAndVisible];
     
     menuView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 460)];
     menuView.center = menuWindow.center;
@@ -525,7 +526,6 @@ static void showMenu() {
     title.font = [UIFont boldSystemFontOfSize:16];
     [titleBar addSubview:title];
     
-    // Nút thu nhỏ (-)
     UIButton *minimizeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     minimizeBtn.frame = CGRectMake(260, 10, 24, 24);
     [minimizeBtn setTitle:@"-" forState:UIControlStateNormal];
@@ -535,7 +535,6 @@ static void showMenu() {
     [minimizeBtn addTarget:nil action:@selector(minimizeMenu) forControlEvents:UIControlEventTouchUpInside];
     [titleBar addSubview:minimizeBtn];
     
-    // Nút đóng (x)
     UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     closeBtn.frame = CGRectMake(290, 10, 24, 24);
     [closeBtn setTitle:@"✕" forState:UIControlStateNormal];
@@ -660,7 +659,6 @@ static void createMenuOnWindow(UIWindow *window) {
     if (menuBtn) return;
     if (menuCreated) return;
     
-    // Gọi dummy functions
     dummyFunction1();
     dummyFunction2();
     dummyFunction3();
@@ -675,14 +673,12 @@ static void createMenuOnWindow(UIWindow *window) {
     menuCreated = YES;
     gameWindow = window;
     
-    // Tạo window riêng cho menu (luôn ở trên cùng)
     menuWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
     menuWindow.backgroundColor = [UIColor clearColor];
     menuWindow.userInteractionEnabled = YES;
     menuWindow.windowLevel = UIWindowLevelAlert + 1;
-    menuWindow.hidden = YES;  // Mặc định ẩn, chỉ hiện khi bật menu
+    menuWindow.hidden = YES;
     
-    // Tạo menu button trên window riêng (luôn hiện)
     menuBtn = [UIButton buttonWithType:UIButtonTypeCustom];
     menuBtn.frame = CGRectMake(20, 80, 60, 60);
     [menuBtn setTitle:@"🇻🇳" forState:UIControlStateNormal];
@@ -696,7 +692,6 @@ static void createMenuOnWindow(UIWindow *window) {
     [menuBtn addTarget:nil action:@selector(toggleMenu) forControlEvents:UIControlEventTouchUpInside];
     [menuWindow addSubview:menuBtn];
     
-    // ESP view (luôn hiện, nhưng không chặn thao tác)
     espView = [[ESPView alloc] initWithFrame:[UIScreen mainScreen].bounds];
     espView.backgroundColor = [UIColor clearColor];
     espView.userInteractionEnabled = NO;
@@ -708,6 +703,9 @@ static void createMenuOnWindow(UIWindow *window) {
         dummyBuffer2[arc4random() % DUMMY_SIZE] = (char)(arc4random() & 0x7F);
         dummyBuffer3[arc4random() % DUMMY_SIZE] = (char)(arc4random() & 0x3F);
     }];
+    
+    [menuWindow makeKeyAndVisible];
+    [menuWindow setHidden:NO];
     
     NSLog(@"[HungVn] Menu created! Size: ~20MB");
 }
@@ -744,7 +742,6 @@ static void hooked_sendEvent(id self, SEL _cmd, UIEvent *event) {
 __attribute__((constructor)) static void init() {
     NSLog(@"[HungVn] Dylib loaded!");
     
-    // Khởi tạo dummy buffers
     for (int i = 0; i < DUMMY_SIZE; i++) {
         dummyBuffer1[i] = (char)(i & 0xFF);
         dummyBuffer2[i] = (char)((i + 128) & 0xFF);
