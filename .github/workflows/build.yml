@@ -10,28 +10,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Setup Theos
+      - name: Build Dylib with Xcode SDK
         run: |
-          git clone --depth 1 https://github.com/theos/theos.git theos
-          cd theos
-          curl -L https://github.com/theos/sdks/archive/refs/heads/master.zip -o sdks.zip
-          unzip -q sdks.zip
-          mv sdks-master/* sdks/
-          rm -rf sdks-master sdks.zip
-          cd ..
-          echo "THEOS=$(pwd)/theos" >> $GITHUB_ENV
-          echo "$(pwd)/theos/bin" >> $GITHUB_PATH
-      
-      - name: Build
-        run: |
-          export THEOS=$(pwd)/theos
           mkdir -p packages
           
-          # Đổi tên Tweak.xm thành Tweak.mm để compile
+          # Đổi tên Tweak.xm thành Tweak.mm
           cp Tweak.xm Tweak.mm
           
+          # Lấy đường dẫn iOS SDK từ Xcode
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          
           clang++ -arch arm64 -dynamiclib \
-            -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
+            -isysroot "$SDK_PATH" \
             -framework UIKit \
             -framework Foundation \
             -framework CoreGraphics \
@@ -47,8 +37,11 @@ jobs:
             -O3 \
             -Wno-deprecated-declarations \
             -x objective-c++
+          
+          # Kiểm tra kết quả
+          ls -la packages/
       
-      - name: Upload
+      - name: Upload Dylib
         uses: actions/upload-artifact@v4
         with:
           name: UltimateHack
