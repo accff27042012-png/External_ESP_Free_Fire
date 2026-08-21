@@ -1,26 +1,73 @@
 name: Build Dylib
+
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build
+      
+      - name: Setup iOS SDK
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_*.app 2>/dev/null || true
+          echo "SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)" >> $GITHUB_ENV
+      
+      - name: Build Dylib
         run: |
           mkdir -p output
-          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || echo "")
+          
+          # Tìm tất cả file .mm và .cpp trong esp/Core/
+          SOURCES=$(find esp/Core -name "*.mm" -o -name "*.cpp" 2>/dev/null | tr '\n' ' ')
+          
+          if [ -z "$SOURCES" ]; then
+            echo "❌ Không tìm thấy source trong esp/Core/"
+            exit 1
+          fi
+          
+          echo "📦 Compiling: $SOURCES"
+          
+          # Build với Clang
           clang++ -arch arm64 -dynamiclib \
-            -isysroot "$SDK" \
-            -framework UIKit -framework Foundation \
-            -framework CoreGraphics -framework QuartzCore \
-            -framework OpenGLES -framework Metal \
-            -Iesp -Iesp/Core -I. \
-            esp/Core/*.mm esp/Core/*.cpp \
+            -isysroot "$SDK_PATH" \
+            -framework UIKit \
+            -framework Foundation \
+            -framework CoreGraphics \
+            -framework QuartzCore \
+            -framework OpenGLES \
+            -framework Metal \
+            -framework CoreImage \
+            -Iesp \
+            -Iesp/Core \
+            -I. \
+            -D_USE_MATH_DEFINES \
+            $SOURCES \
             -o output/UltimateHack.dylib \
             -install_name @rpath/UltimateHack.dylib \
-            -fobjc-arc -std=c++14 -O3 -fpermissive
-      - uses: actions/upload-artifact@v4
+            -fobjc-arc \
+            -std=c++14 \
+            -O3 \
+            -Wno-deprecated-declarations \
+            -Wno-unused-variable \
+            -Wno-c++11-compat \
+            -fpermissive
+          
+          # Kiểm tra kết quả
+          if [ -f "output/UltimateHack.dylib" ]; then
+            echo "✅ Build thành công!"
+            ls -la output/
+          else
+            echo "❌ Build thất bại, không tìm thấy output/UltimateHack.dylib"
+            exit 1
+          fi
+      
+      - name: Upload Dylib
+        uses: actions/upload-artifact@v4
         with:
           name: UltimateHack
           path: output/*.dylib
+          retention-days: 30
