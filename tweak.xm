@@ -7,7 +7,7 @@
 #include <sys/sysctl.h>
 
 // ============================================================
-// OFFSET (GIỮ NGUYÊN)
+// OFFSET (CŨ - CÓ THỂ KHÔNG CHÍNH XÁC)
 // ============================================================
 #define OFFSET_LOCAL_PLAYER        0xB8
 #define OFFSET_ENTITY_LIST         0x440
@@ -53,9 +53,9 @@ struct Vector3 {
 // ============================================================
 static uintptr_t baseAddress = 0;
 static bool espEnabled = YES;
-static bool aimbotEnabled = YES;
 static bool wallHackEnabled = YES;
-static int aimbotMode = 0;
+static bool aimbotEnabled = YES;
+static int aimbotMode = 0; // 0: Luôn aim, 1: Khi bắn, 2: Khi ngắm
 static float aimFov = 30.0f;
 static bool isFiring = NO;
 static bool isAiming = NO;
@@ -220,6 +220,11 @@ static uintptr_t getBestTarget() {
         int team = getEntityTeam(entity);
         if (team == myTeam) continue;
         
+        // Check wall (nếu bật)
+        if (!wallHackEnabled) {
+            // Kiểm tra vật cản (bỏ qua)
+        }
+        
         Vector3 entityPos = getEntityPos(entity);
         float dist = Vector3::Distance(playerPos, entityPos);
         if (dist > 200) continue;
@@ -282,17 +287,20 @@ static uintptr_t getBestTarget() {
         if (boxSize < 5) boxSize = 5;
         if (boxSize > 100) boxSize = 100;
         
+        // BOX TRẮNG
         CGContextSetStrokeColorWithColor(ctx, [UIColor whiteColor].CGColor);
         CGContextSetLineWidth(ctx, 2.0);
         CGContextAddRect(ctx, CGRectMake(screenX - boxSize/2, screenY - boxSize, boxSize, boxSize));
         CGContextStrokePath(ctx);
         
+        // LINE
         CGContextSetStrokeColorWithColor(ctx, [UIColor colorWithWhite:0.5 alpha:0.5].CGColor);
         CGContextSetLineWidth(ctx, 1.0);
         CGContextMoveToPoint(ctx, screenX, screenY);
         CGContextAddLineToPoint(ctx, screenX, screenY + boxSize * 0.8);
         CGContextStrokePath(ctx);
         
+        // HEALTH BAR
         float hpPercent = health / 100.0f;
         if (hpPercent < 0) hpPercent = 0;
         if (hpPercent > 1) hpPercent = 1;
@@ -306,6 +314,7 @@ static uintptr_t getBestTarget() {
         float hpHeight = boxSize * hpPercent;
         CGContextFillRect(ctx, CGRectMake(screenX - boxSize/2 - 5, screenY - boxSize - 2 + (boxSize - hpHeight), 2, hpHeight));
         
+        // DISTANCE
         NSString *distStr = [NSString stringWithFormat:@"%.0fm", dist];
         NSDictionary *attrs = @{
             NSFontAttributeName: [UIFont boldSystemFontOfSize:10],
@@ -320,13 +329,14 @@ static uintptr_t getBestTarget() {
 @end
 
 // ============================================================
-// MENU MỚI
+// MENU
 // ============================================================
 static UIButton *menuBtn = nil;
 static UIView *menuView = nil;
 static BOOL menuVisible = NO;
 static BOOL menuMinimized = NO;
 static ESPView *espView = nil;
+static BOOL menuCreated = NO;
 
 static void toggleESP(UISwitch *sender) { espEnabled = sender.isOn; }
 static void toggleWallhack(UISwitch *sender) { wallHackEnabled = sender.isOn; }
@@ -386,13 +396,16 @@ static void showMenu() {
     menuView.layer.cornerRadius = 16;
     menuView.layer.borderColor = [UIColor colorWithRed:218/255.0 green:37/255.0 blue:28/255.0 alpha:1.0].CGColor;
     menuView.layer.borderWidth = 2;
+    menuView.userInteractionEnabled = YES;
     [window addSubview:menuView];
+    [window bringSubviewToFront:menuView];
     
     // Title Bar
     UIView *titleBar = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 44)];
     titleBar.backgroundColor = [UIColor colorWithWhite:0.1 alpha:1.0];
     titleBar.layer.cornerRadius = 16;
     titleBar.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
+    titleBar.userInteractionEnabled = YES;
     [menuView addSubview:titleBar];
     
     UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(20, 10, 200, 24)];
@@ -406,6 +419,7 @@ static void showMenu() {
     [minimizeBtn setTitle:@"-" forState:UIControlStateNormal];
     [minimizeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     minimizeBtn.titleLabel.font = [UIFont boldSystemFontOfSize:20];
+    minimizeBtn.userInteractionEnabled = YES;
     [minimizeBtn addTarget:nil action:@selector(minimizeMenu) forControlEvents:UIControlEventTouchUpInside];
     [titleBar addSubview:minimizeBtn];
     
@@ -414,6 +428,7 @@ static void showMenu() {
     [closeBtn setTitle:@"✕" forState:UIControlStateNormal];
     [closeBtn setTitleColor:[UIColor redColor] forState:UIControlStateNormal];
     closeBtn.titleLabel.font = [UIFont boldSystemFontOfSize:16];
+    closeBtn.userInteractionEnabled = YES;
     [closeBtn addTarget:nil action:@selector(closeMenu) forControlEvents:UIControlEventTouchUpInside];
     [titleBar addSubview:closeBtn];
     
@@ -424,6 +439,7 @@ static void showMenu() {
     UISwitch *espSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(230, yOffset, 50, 30)];
     espSwitch.onTintColor = [UIColor colorWithRed:218/255.0 green:37/255.0 blue:28/255.0 alpha:1.0];
     espSwitch.thumbTintColor = [UIColor colorWithRed:255/255.0 green:255/255.0 blue:0/255.0 alpha:1.0];
+    espSwitch.userInteractionEnabled = YES;
     [espSwitch setOn:espEnabled];
     [espSwitch addTarget:nil action:@selector(toggleESP:) forControlEvents:UIControlEventValueChanged];
     [menuView addSubview:espSwitch];
@@ -439,6 +455,7 @@ static void showMenu() {
     UISwitch *whSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(230, yOffset, 50, 30)];
     whSwitch.onTintColor = [UIColor colorWithRed:218/255.0 green:37/255.0 blue:28/255.0 alpha:1.0];
     whSwitch.thumbTintColor = [UIColor colorWithRed:255/255.0 green:255/255.0 blue:0/255.0 alpha:1.0];
+    whSwitch.userInteractionEnabled = YES;
     [whSwitch setOn:wallHackEnabled];
     [whSwitch addTarget:nil action:@selector(toggleWallhack:) forControlEvents:UIControlEventValueChanged];
     [menuView addSubview:whSwitch];
@@ -454,6 +471,7 @@ static void showMenu() {
     UISwitch *aimSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(230, yOffset, 50, 30)];
     aimSwitch.onTintColor = [UIColor colorWithRed:218/255.0 green:37/255.0 blue:28/255.0 alpha:1.0];
     aimSwitch.thumbTintColor = [UIColor colorWithRed:255/255.0 green:255/255.0 blue:0/255.0 alpha:1.0];
+    aimSwitch.userInteractionEnabled = YES;
     [aimSwitch setOn:aimbotEnabled];
     [aimSwitch addTarget:nil action:@selector(toggleAimbot:) forControlEvents:UIControlEventValueChanged];
     [menuView addSubview:aimSwitch];
@@ -478,6 +496,7 @@ static void showMenu() {
     [modeSeg insertSegmentWithTitle:@"Ngắm" atIndex:2 animated:NO];
     modeSeg.selectedSegmentIndex = aimbotMode;
     modeSeg.tintColor = [UIColor colorWithRed:218/255.0 green:37/255.0 blue:28/255.0 alpha:1.0];
+    modeSeg.userInteractionEnabled = YES;
     [modeSeg addTarget:nil action:@selector(aimModeChanged:) forControlEvents:UIControlEventValueChanged];
     [menuView addSubview:modeSeg];
     yOffset += 70;
@@ -503,6 +522,7 @@ static void showMenu() {
     fovSlider.value = aimFov;
     fovSlider.minimumTrackTintColor = [UIColor colorWithRed:218/255.0 green:37/255.0 blue:28/255.0 alpha:1.0];
     fovSlider.maximumTrackTintColor = [UIColor grayColor];
+    fovSlider.userInteractionEnabled = YES;
     [fovSlider addTarget:nil action:@selector(fovChanged:) forControlEvents:UIControlEventValueChanged];
     fovSlider.tag = 998;
     [menuView addSubview:fovSlider];
@@ -512,16 +532,22 @@ static void showMenu() {
 }
 
 static void toggleMenu() {
-    if (menuVisible) closeMenu();
-    else showMenu();
+    if (menuVisible) {
+        closeMenu();
+    } else {
+        showMenu();
+    }
 }
 
 // ============================================================
-// HÀM TẠO MENU
+// HÀM TẠO MENU (LUÔN HIỆN)
 // ============================================================
 static void createMenuOnWindow(UIWindow *window) {
     if (!window) return;
     if (menuBtn) return;
+    if (menuCreated) return;
+    
+    menuCreated = YES;
     
     menuBtn = [UIButton buttonWithType:UIButtonTypeCustom];
     menuBtn.frame = CGRectMake(20, 80, 60, 60);
@@ -532,14 +558,17 @@ static void createMenuOnWindow(UIWindow *window) {
     menuBtn.layer.cornerRadius = 30;
     menuBtn.layer.borderColor = [UIColor colorWithRed:218/255.0 green:37/255.0 blue:28/255.0 alpha:1.0].CGColor;
     menuBtn.layer.borderWidth = 2;
+    menuBtn.userInteractionEnabled = YES;
     [menuBtn addTarget:nil action:@selector(toggleMenu) forControlEvents:UIControlEventTouchUpInside];
     [window addSubview:menuBtn];
+    [window bringSubviewToFront:menuBtn];
     
     espView = [[ESPView alloc] initWithFrame:[UIScreen mainScreen].bounds];
     espView.backgroundColor = [UIColor clearColor];
     espView.userInteractionEnabled = NO;
     espView.layer.zPosition = 9999;
     [window addSubview:espView];
+    [window bringSubviewToFront:espView];
     
     [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer *timer) {
         [espView setNeedsDisplay];
@@ -549,24 +578,22 @@ static void createMenuOnWindow(UIWindow *window) {
 }
 
 // ============================================================
-// HOOK UIApplication sendEvent
+// HOOK UIApplication
 // ============================================================
 static IMP orig_sendEvent = NULL;
 
 static void hooked_sendEvent(id self, SEL _cmd, UIEvent *event) {
-    static BOOL menuCreated = NO;
-    if (!menuCreated) {
-        menuCreated = YES;
+    static BOOL firstRun = NO;
+    if (!firstRun) {
+        firstRun = YES;
         dispatch_async(dispatch_get_main_queue(), ^{
             UIWindow *window = [UIApplication sharedApplication].keyWindow;
             if (window) {
                 createMenuOnWindow(window);
             } else {
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                     UIWindow *window2 = [UIApplication sharedApplication].keyWindow;
-                    if (window2) {
-                        createMenuOnWindow(window2);
-                    }
+                    if (window2) createMenuOnWindow(window2);
                 });
             }
         });
